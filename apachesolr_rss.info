@@ -1,0 +1,7 @@
+name = Apache Solr RSS
+description = "Provides RSS feeds of search results."
+core = 7.x
+package = Search Toolkit
+version = "7.x-1.x-dev"
+
+dependencies[] = apachesolr

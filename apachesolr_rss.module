@@ -1,0 +1,176 @@
+<?php
+/**
+ * @file 
+ * 
+ * Copyright 2012 New Signature
+ * http://www.newsignature.com
+ *
+ * @author Andrew Marcus
+ * @since Mar 9, 2012
+ */
+
+/**
+ * Implements hook_permission().
+ */
+function apachesolr_rss_permission() {
+  $permissions = array(
+    'rss search results' => array(
+      'title' => t('View RSS Search results'),
+      'description' => t('Allows users to get search results as an RSS feed'),
+    ),
+  );
+  return $permissions;
+}
+
+/**
+ * Implements hook_menu().
+ */
+function apachesolr_rss_menu() {
+  $items = array();
+  
+  try {
+    // Gets search pages directly from the index.
+    // @todo Honor "enabled" settings?
+    $result = db_select('apachesolr_search_page', 's')
+      ->fields('s', array('page_id', 'search_path', 'page_title', 'env_id'))
+      ->condition('env_id', '', '<>')
+      ->execute();
+  }
+  catch (Exception $e) {
+    watchdog_exception('apachesolr_search', $e);
+    $result = array();
+  }
+
+  // Gets default search information.
+  $default_info = search_get_default_module_info();
+
+  // Iterates over search pages, builds menu items.
+  foreach ($result as $record) {
+    // Validate the environemnt ID in case of import or missed deletion.
+    $environment = apachesolr_environment_load($record->env_id);
+    if (!$environment) {
+      continue;
+    }
+    // Parses search path into it's various parts, builds menu items dependent
+    // on whether %keys is in the path.
+    $parts = explode('/', $record->search_path);
+    $keys_pos = count($parts);
+    // Tests whether we are simulating a core search tab.
+    $core_search = ($parts[0] == 'search');
+
+    $items[$record->search_path . '/rss'] = array(
+      'title' => $record->page_title,
+      'page callback' => 'apachesolr_rss_search_page',
+      'page arguments' => array($record->page_id, ''),
+      'access arguments' => array('rss search results'),
+      'type' => ($core_search) ? MENU_LOCAL_TASK : MENU_SUGGESTED_ITEM,
+    );
+
+    $items[$record->search_path . '/rss/%menu_tail'] = array(
+      'title' => $record->page_title,
+      'load arguments' => array('%map', '%index'),
+      'page callback' => 'apachesolr_rss_search_page',
+      'page arguments' => array($record->page_id, $keys_pos + 1),
+      'access arguments' => array('rss search results'),
+      'type' => MENU_LOCAL_TASK,
+    );
+  }
+  
+  return $items;
+}
+
+function apachesolr_rss_search_page($page_id, $keys = '') {
+  $search_page = apachesolr_search_page_load($page_id);
+
+  $filters = isset($search_page->settings['fq']) ? $search_page->settings['fq'] : array();
+  $solrsort = isset($_GET['solrsort']) ? $_GET['solrsort'] : '';
+  
+  $params = drupal_get_query_parameters();
+  $params['q'] = $keys;
+  $params['fq'] = $filters;
+
+  try {
+    $solr = apachesolr_get_solr($search_page->env_id);
+    $nids = array();
+
+    $results = apachesolr_search_run('apachesolr', $params, $solrsort, $search_page->search_path, pager_find_page(), $solr);
+      
+    foreach ($results as $result) {
+      if ($result['entity_type'] == 'node' && isset($result['fields']['entity_id'])) {
+        $nids[] = $result['fields']['entity_id'];
+      }
+    }
+    $channel = array(
+      'title' => t('@site | Search Results', array(
+        '@site' => variable_get('site_name', 'Drupal')
+      )),
+      'link' => url($_GET['q'], array(
+        'query' => drupal_get_query_parameters(),
+        'absolute' => TRUE,
+      )),
+    );
+    $context = array(
+      'keys' => $keys, 
+      'params' => $params,
+      'page' => $search_page,
+    );
+    drupal_alter('apachesolr_rss_channel', $channel, $context);
+    
+    node_feed($nids, $channel);
+  }
+  catch (Exception $e) {
+    watchdog('Apache Solr', nl2br(check_plain($e->getMessage())), NULL, WATCHDOG_ERROR);
+    apachesolr_failure(t('Solr search'), $keys);
+    return '';
+  }
+}
+
+function apachesolr_rss_feed_url($url = NULL, $params = NULL) {
+  $paths = &drupal_static(__FUNCTION__, array());
+  
+  // Current page URL
+  if (!isset($url)) {
+    $url = $_GET['q'];
+  }
+  if (!isset($paths[$url])) {
+    $item = menu_get_item($url);
+    $path = array();
+    if ($item) {
+      foreach ($item['map'] as $key => $val) {
+        // If there is a load function for the rest of the menu path, insert the 'rss' item before it
+        if (isset($item['load_functions'][$key]) && $item['load_functions'][$key] == 'menu_tail_load') {
+          $path[] = 'rss';
+        }
+        $path[] = $val;
+      }
+      if (!in_array('rss', $path)) {
+        $path[] = 'rss';
+      }
+    }
+    else {
+      $path = array($url, 'rss');
+    }
+    $paths[$url] = implode('/', $path);
+  }
+  if (!isset($params)) {
+    $params = drupal_get_query_parameters($_GET, array('q', 'rows', 'page'));
+  }
+  
+  return array( $paths[$url], array(
+    'query' => $params,
+  ));
+}
+
+/**
+ * Implements hook_preprocess_search_results().
+ */
+function apachesolr_rss_preprocess_search_results(&$variables) {
+  list($path, $options) = apachesolr_rss_feed_url();
+  
+  drupal_add_html_head_link(array(
+    'rel' => 'alternate',
+    'type' => 'application/rss+xml',
+    'title' => t('RSS'),
+    'href' => url($path, $options + array( 'absolute' => TRUE )),
+  ));
+}
