@@ -15,7 +15,7 @@ built-in RSS display mode for the resulting nodes in order to assemble each RSS 
 You can implement <code>hook_node_view()</code> in order to override the RSS item and modify
 the description field or add additional XML tags.
 
-In addition, you can implement <code>apachesolr_rss_channel_alter()</code> to modify properties of the 
+In addition, you can implement <code>hook_apachesolr_rss_channel_alter()</code> to modify properties of the 
 channel tag itself.  For instance, you may wish to include in the feed's description a summary of the 
 keywords, facets and filters that were applied.  Since this happens outside the scope of the apachesolr
 module, we leave it to the user to determine how best to format and display these elements.
