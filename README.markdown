@@ -23,7 +23,7 @@ module, we leave it to the user to determine how best to format and display thes
 
 ## License
 
-Copyright New Signature 2010 - 2011
+Copyright New Signature 2012
 
 This program is free software: you can redistribute it and/or modify it under the terms of the 
 GNU General Public License as published by the Free Software Foundation, either version 3 of the 
